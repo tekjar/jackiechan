@@ -317,7 +317,6 @@ impl<T> Sender<T> {
     /// # Examples
     ///
     /// ```
-    /// # futures_lite::future::block_on(async {
     /// use jackiechan::bounded;
     ///
     /// let (s, r) = bounded(10);
@@ -325,7 +324,6 @@ impl<T> Sender<T> {
     /// assert!(s.is_empty());
     /// s.send(1);
     /// assert!(!s.is_empty());
-    /// # });
     /// ```
     pub fn is_empty(&self) -> bool {
         self.channel.queue.is_empty()
@@ -666,7 +664,6 @@ impl<T> Receiver<T> {
     /// # Examples
     ///
     /// ```
-    /// # futures_lite::future::block_on(async {
     /// use jackiechan::bounded;
     ///
     /// let (s, r) = bounded(10);
@@ -675,7 +672,6 @@ impl<T> Receiver<T> {
     /// s.send(1);
     /// s.send(2);
     /// assert_eq!(r.len(), 2);
-    /// # });
     /// ```
     pub fn len(&self) -> usize {
         self.channel.queue.len()
