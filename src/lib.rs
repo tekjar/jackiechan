@@ -6,7 +6,6 @@
 //! There are two kinds of channels:
 //!
 //! 1. [Bounded][`bounded()`] channel with limited capacity.
-//! 2. [Unbounded][`unbounded()`] channel with unlimited capacity.
 //!
 //! A channel has the [`Sender`] and [`Receiver`] side. Both sides are cloneable and can be shared
 //! among multiple threads.
@@ -20,12 +19,10 @@
 //! # Examples
 //!
 //! ```
-//! # futures_lite::future::block_on(async {
-//! let (s, r) = jackiechan::unbounded();
+//! let (s, r) = jackiechan::bounded(1);
 //!
-//! assert_eq!(s.send("Hello").await, Ok(()));
-//! assert_eq!(r.recv().await, Ok("Hello"));
-//! # });
+//! assert_eq!(s.send("Hello"), Ok(()));
+//! assert_eq!(r.recv(), Ok("Hello"));
 //! ```
 
 #![forbid(unsafe_code)]
@@ -96,61 +93,20 @@ impl<T> Channel<T> {
 /// # Examples
 ///
 /// ```
-/// # futures_lite::future::block_on(async {
 /// use jackiechan::{bounded, TryRecvError, TrySendError};
 ///
 /// let (s, r) = bounded(1);
 ///
-/// assert_eq!(s.send(10).await, Ok(()));
+/// assert_eq!(s.send(10), Ok(()));
 /// assert_eq!(s.try_send(20), Err(TrySendError::Full(20)));
 ///
-/// assert_eq!(r.recv().await, Ok(10));
+/// assert_eq!(r.recv(), Ok(10));
 /// assert_eq!(r.try_recv(), Err(TryRecvError::Empty));
-/// # });
 pub fn bounded<T>(cap: usize) -> (Sender<T>, Receiver<T>) {
     assert!(cap > 0, "capacity cannot be zero");
 
     let channel = Arc::new(Channel {
         queue: ConcurrentQueue::bounded(cap),
-        send_ops: Event::new(),
-        recv_ops: Event::new(),
-        stream_ops: Event::new(),
-        sender_count: AtomicUsize::new(1),
-        receiver_count: AtomicUsize::new(1),
-    });
-
-    let s = Sender {
-        channel: channel.clone(),
-    };
-    let r = Receiver {
-        channel,
-        listener: None,
-    };
-    (s, r)
-}
-
-/// Creates an unbounded channel.
-///
-/// The created channel can hold an unlimited number of messages.
-///
-/// # Examples
-///
-/// ```
-/// # futures_lite::future::block_on(async {
-/// use jackiechan::{unbounded, TryRecvError};
-///
-/// let (s, r) = unbounded();
-///
-/// assert_eq!(s.send(10).await, Ok(()));
-/// assert_eq!(s.send(20).await, Ok(()));
-///
-/// assert_eq!(r.recv().await, Ok(10));
-/// assert_eq!(r.recv().await, Ok(20));
-/// assert_eq!(r.try_recv(), Err(TryRecvError::Empty));
-/// # });
-pub fn unbounded<T>() -> (Sender<T>, Receiver<T>) {
-    let channel = Arc::new(Channel {
-        queue: ConcurrentQueue::unbounded(),
         send_ops: Event::new(),
         recv_ops: Event::new(),
         stream_ops: Event::new(),
@@ -224,17 +180,67 @@ impl<T> Sender<T> {
     /// # Examples
     ///
     /// ```
-    /// # futures_lite::future::block_on(async {
-    /// use jackiechan::{unbounded, SendError};
+    /// use jackiechan::{bounded, SendError};
     ///
-    /// let (s, r) = unbounded();
+    /// let (s, r) = bounded(100);
     ///
-    /// assert_eq!(s.send(1).await, Ok(()));
+    /// assert_eq!(s.send(1), Ok(()));
     /// drop(r);
-    /// assert_eq!(s.send(2).await, Err(SendError(2)));
+    /// assert_eq!(s.send(2), Err(SendError(2)));
+    /// ```
+    pub fn send(&self, msg: T) -> Result<(), SendError<T>> {
+        let mut listener = None;
+        let mut msg = msg;
+
+        loop {
+            // Attempt to send a message.
+            match self.try_send(msg) {
+                Ok(()) => {
+                    // If the capacity is larger than 1, notify another blocked send operation.
+                    match self.channel.queue.capacity() {
+                        Some(1) => {}
+                        Some(_) | None => self.channel.send_ops.notify(1),
+                    }
+                    return Ok(());
+                }
+                Err(TrySendError::Closed(msg)) => return Err(SendError(msg)),
+                Err(TrySendError::Full(m)) => msg = m,
+            }
+
+            // Sending failed - now start listening for notifications or wait for one.
+            match listener.take() {
+                None => {
+                    // Start listening and then try receiving again.
+                    listener = Some(self.channel.send_ops.listen());
+                }
+                Some(l) => {
+                    // Wait for a notification.
+                    l.wait();
+                }
+            }
+        }
+    }
+
+    /// Sends a message into the channel.
+    ///
+    /// If the channel is full, this method waits until there is space for a message.
+    ///
+    /// If the channel is closed, this method returns an error.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # futures_lite::future::block_on(async {
+    /// use jackiechan::{bounded, SendError};
+    ///
+    /// let (s, r) = bounded(100);
+    ///
+    /// assert_eq!(s.async_send(1).await, Ok(()));
+    /// drop(r);
+    /// assert_eq!(s.async_send(2).await, Err(SendError(2)));
     /// # });
     /// ```
-    pub async fn send(&self, msg: T) -> Result<(), SendError<T>> {
+    pub async fn async_send(&self, msg: T) -> Result<(), SendError<T>> {
         let mut listener = None;
         let mut msg = msg;
 
@@ -276,16 +282,14 @@ impl<T> Sender<T> {
     /// # Examples
     ///
     /// ```
-    /// # futures_lite::future::block_on(async {
-    /// use jackiechan::{unbounded, RecvError};
+    /// use jackiechan::{bounded, RecvError};
     ///
-    /// let (s, r) = unbounded();
-    /// assert_eq!(s.send(1).await, Ok(()));
+    /// let (s, r) = bounded(10);
+    /// assert_eq!(s.send(1), Ok(()));
     /// assert!(s.close());
     ///
-    /// assert_eq!(r.recv().await, Ok(1));
-    /// assert_eq!(r.recv().await, Err(RecvError));
-    /// # });
+    /// assert_eq!(r.recv(), Ok(1));
+    /// assert_eq!(r.recv(), Err(RecvError));
     /// ```
     pub fn close(&self) -> bool {
         self.channel.close()
@@ -296,15 +300,13 @@ impl<T> Sender<T> {
     /// # Examples
     ///
     /// ```
-    /// # futures_lite::future::block_on(async {
-    /// use jackiechan::{unbounded, RecvError};
+    /// use jackiechan::{bounded, RecvError};
     ///
-    /// let (s, r) = unbounded::<()>();
+    /// let (s, r) = bounded::<()>(10);
     /// assert!(!s.is_closed());
     ///
-    /// drop(r);
+    /// s.close();
     /// assert!(s.is_closed());
-    /// # });
     /// ```
     pub fn is_closed(&self) -> bool {
         self.channel.queue.is_closed()
@@ -316,12 +318,12 @@ impl<T> Sender<T> {
     ///
     /// ```
     /// # futures_lite::future::block_on(async {
-    /// use jackiechan::unbounded;
+    /// use jackiechan::bounded;
     ///
-    /// let (s, r) = unbounded();
+    /// let (s, r) = bounded(10);
     ///
     /// assert!(s.is_empty());
-    /// s.send(1).await;
+    /// s.send(1);
     /// assert!(!s.is_empty());
     /// # });
     /// ```
@@ -336,15 +338,13 @@ impl<T> Sender<T> {
     /// # Examples
     ///
     /// ```
-    /// # futures_lite::future::block_on(async {
     /// use jackiechan::bounded;
     ///
     /// let (s, r) = bounded(1);
     ///
     /// assert!(!s.is_full());
-    /// s.send(1).await;
+    /// s.send(1);
     /// assert!(s.is_full());
-    /// # });
     /// ```
     pub fn is_full(&self) -> bool {
         self.channel.queue.is_full()
@@ -355,16 +355,14 @@ impl<T> Sender<T> {
     /// # Examples
     ///
     /// ```
-    /// # futures_lite::future::block_on(async {
-    /// use jackiechan::unbounded;
+    /// use jackiechan::bounded;
     ///
-    /// let (s, r) = unbounded();
+    /// let (s, r) = bounded(10);
     /// assert_eq!(s.len(), 0);
     ///
-    /// s.send(1).await;
-    /// s.send(2).await;
+    /// s.send(1);
+    /// s.send(2);
     /// assert_eq!(s.len(), 2);
-    /// # });
     /// ```
     pub fn len(&self) -> usize {
         self.channel.queue.len()
@@ -375,13 +373,10 @@ impl<T> Sender<T> {
     /// # Examples
     ///
     /// ```
-    /// use jackiechan::{bounded, unbounded};
+    /// use jackiechan::{bounded};
     ///
     /// let (s, r) = bounded::<i32>(5);
     /// assert_eq!(s.capacity(), Some(5));
-    ///
-    /// let (s, r) = unbounded::<i32>();
-    /// assert_eq!(s.capacity(), None);
     /// ```
     pub fn capacity(&self) -> Option<usize> {
         self.channel.queue.capacity()
@@ -392,15 +387,13 @@ impl<T> Sender<T> {
     /// # Examples
     ///
     /// ```
-    /// # futures_lite::future::block_on(async {
-    /// use jackiechan::unbounded;
+    /// use jackiechan::bounded;
     ///
-    /// let (s, r) = unbounded::<()>();
+    /// let (s, r) = bounded::<()>(10);
     /// assert_eq!(s.receiver_count(), 1);
     ///
     /// let r2 = r.clone();
     /// assert_eq!(s.receiver_count(), 2);
-    /// # });
     /// ```
     pub fn receiver_count(&self) -> usize {
         self.channel.receiver_count.load(Ordering::SeqCst)
@@ -411,15 +404,13 @@ impl<T> Sender<T> {
     /// # Examples
     ///
     /// ```
-    /// # futures_lite::future::block_on(async {
-    /// use jackiechan::unbounded;
+    /// use jackiechan::bounded;
     ///
-    /// let (s, r) = unbounded::<()>();
+    /// let (s, r) = bounded::<()>(10);
     /// assert_eq!(s.sender_count(), 1);
     ///
     /// let s2 = s.clone();
     /// assert_eq!(s.sender_count(), 2);
-    /// # });
     /// ```
     pub fn sender_count(&self) -> usize {
         self.channel.sender_count.load(Ordering::SeqCst)
@@ -480,18 +471,16 @@ impl<T> Receiver<T> {
     /// # Examples
     ///
     /// ```
-    /// # futures_lite::future::block_on(async {
-    /// use jackiechan::{unbounded, TryRecvError};
+    /// use jackiechan::{bounded, TryRecvError};
     ///
-    /// let (s, r) = unbounded();
-    /// assert_eq!(s.send(1).await, Ok(()));
+    /// let (s, r) = bounded(10);
+    /// assert_eq!(s.send(1), Ok(()));
     ///
     /// assert_eq!(r.try_recv(), Ok(1));
     /// assert_eq!(r.try_recv(), Err(TryRecvError::Empty));
     ///
     /// drop(s);
     /// assert_eq!(r.try_recv(), Err(TryRecvError::Closed));
-    /// # });
     /// ```
     pub fn try_recv(&self) -> Result<T, TryRecvError> {
         match self.channel.queue.pop() {
@@ -517,19 +506,56 @@ impl<T> Receiver<T> {
     /// # Examples
     ///
     /// ```
-    /// # futures_lite::future::block_on(async {
-    /// use jackiechan::{unbounded, RecvError};
+    /// use jackiechan::{bounded, RecvError};
     ///
-    /// let (s, r) = unbounded();
+    /// let (s, r) = bounded(10);
     ///
-    /// assert_eq!(s.send(1).await, Ok(()));
+    /// assert_eq!(s.send(1), Ok(()));
     /// drop(s);
     ///
-    /// assert_eq!(r.recv().await, Ok(1));
-    /// assert_eq!(r.recv().await, Err(RecvError));
-    /// # });
+    /// assert_eq!(r.recv(), Ok(1));
+    /// assert_eq!(r.recv(), Err(RecvError));
     /// ```
-    pub async fn recv(&self) -> Result<T, RecvError> {
+    pub fn recv(&self) -> Result<T, RecvError> {
+        let mut listener = None;
+
+        loop {
+            // Attempt to receive a message.
+            match self.try_recv() {
+                Ok(msg) => {
+                    // If the capacity is larger than 1, notify another blocked receive operation.
+                    // There is no need to notify stream operations because all of them get
+                    // notified every time a message is sent into the channel.
+                    match self.channel.queue.capacity() {
+                        Some(1) => {}
+                        Some(_) | None => self.channel.recv_ops.notify(1),
+                    }
+                    return Ok(msg);
+                }
+                Err(TryRecvError::Closed) => return Err(RecvError),
+                Err(TryRecvError::Empty) => {}
+            }
+
+            // Receiving failed - now start listening for notifications or wait for one.
+            match listener.take() {
+                None => {
+                    // Start listening and then try receiving again.
+                    listener = Some(self.channel.recv_ops.listen());
+                }
+                Some(l) => {
+                    // Wait for a notification.
+                    l.wait();
+                }
+            }
+        }
+    }
+
+    /// Receives a message from the channel.
+    /// If the channel is empty, this method waits until there is a message.
+    ///
+    /// If the channel is closed, this method receives a message or returns an error if there are
+    /// no more messages.
+    pub async fn async_recv(&self) -> Result<T, RecvError> {
         let mut listener = None;
 
         loop {
@@ -572,16 +598,14 @@ impl<T> Receiver<T> {
     /// # Examples
     ///
     /// ```
-    /// # futures_lite::future::block_on(async {
-    /// use jackiechan::{unbounded, RecvError};
+    /// use jackiechan::{bounded, RecvError};
     ///
-    /// let (s, r) = unbounded();
-    /// assert_eq!(s.send(1).await, Ok(()));
+    /// let (s, r) = bounded(10);
+    /// assert_eq!(s.send(1), Ok(()));
     ///
     /// assert!(r.close());
-    /// assert_eq!(r.recv().await, Ok(1));
-    /// assert_eq!(r.recv().await, Err(RecvError));
-    /// # });
+    /// assert_eq!(r.recv(), Ok(1));
+    /// assert_eq!(r.recv(), Err(RecvError));
     /// ```
     pub fn close(&self) -> bool {
         self.channel.close()
@@ -592,15 +616,13 @@ impl<T> Receiver<T> {
     /// # Examples
     ///
     /// ```
-    /// # futures_lite::future::block_on(async {
-    /// use jackiechan::{unbounded, RecvError};
+    /// use jackiechan::{bounded, RecvError};
     ///
-    /// let (s, r) = unbounded::<()>();
+    /// let (s, r) = bounded::<()>(10);
     /// assert!(!r.is_closed());
     ///
     /// drop(s);
     /// assert!(r.is_closed());
-    /// # });
     /// ```
     pub fn is_closed(&self) -> bool {
         self.channel.queue.is_closed()
@@ -611,36 +633,29 @@ impl<T> Receiver<T> {
     /// # Examples
     ///
     /// ```
-    /// # futures_lite::future::block_on(async {
-    /// use jackiechan::unbounded;
+    /// use jackiechan::bounded;
     ///
-    /// let (s, r) = unbounded();
+    /// let (s, r) = bounded(10);
     ///
     /// assert!(s.is_empty());
-    /// s.send(1).await;
+    /// s.send(1);
     /// assert!(!s.is_empty());
-    /// # });
     /// ```
     pub fn is_empty(&self) -> bool {
         self.channel.queue.is_empty()
     }
 
     /// Returns `true` if the channel is full.
-    ///
-    /// Unbounded channels are never full.
-    ///
     /// # Examples
     ///
     /// ```
-    /// # futures_lite::future::block_on(async {
     /// use jackiechan::bounded;
     ///
     /// let (s, r) = bounded(1);
     ///
     /// assert!(!r.is_full());
-    /// s.send(1).await;
+    /// s.send(1);
     /// assert!(r.is_full());
-    /// # });
     /// ```
     pub fn is_full(&self) -> bool {
         self.channel.queue.is_full()
@@ -652,13 +667,13 @@ impl<T> Receiver<T> {
     ///
     /// ```
     /// # futures_lite::future::block_on(async {
-    /// use jackiechan::unbounded;
+    /// use jackiechan::bounded;
     ///
-    /// let (s, r) = unbounded();
+    /// let (s, r) = bounded(10);
     /// assert_eq!(r.len(), 0);
     ///
-    /// s.send(1).await;
-    /// s.send(2).await;
+    /// s.send(1);
+    /// s.send(2);
     /// assert_eq!(r.len(), 2);
     /// # });
     /// ```
@@ -671,13 +686,10 @@ impl<T> Receiver<T> {
     /// # Examples
     ///
     /// ```
-    /// use jackiechan::{bounded, unbounded};
+    /// use jackiechan::{bounded};
     ///
     /// let (s, r) = bounded::<i32>(5);
     /// assert_eq!(r.capacity(), Some(5));
-    ///
-    /// let (s, r) = unbounded::<i32>();
-    /// assert_eq!(r.capacity(), None);
     /// ```
     pub fn capacity(&self) -> Option<usize> {
         self.channel.queue.capacity()
@@ -688,15 +700,13 @@ impl<T> Receiver<T> {
     /// # Examples
     ///
     /// ```
-    /// # futures_lite::future::block_on(async {
-    /// use jackiechan::unbounded;
+    /// use jackiechan::bounded;
     ///
-    /// let (s, r) = unbounded::<()>();
+    /// let (s, r) = bounded::<()>(10);
     /// assert_eq!(r.receiver_count(), 1);
     ///
     /// let r2 = r.clone();
     /// assert_eq!(r.receiver_count(), 2);
-    /// # });
     /// ```
     pub fn receiver_count(&self) -> usize {
         self.channel.receiver_count.load(Ordering::SeqCst)
@@ -707,15 +717,13 @@ impl<T> Receiver<T> {
     /// # Examples
     ///
     /// ```
-    /// # futures_lite::future::block_on(async {
-    /// use jackiechan::unbounded;
+    /// use jackiechan::bounded;
     ///
-    /// let (s, r) = unbounded::<()>();
+    /// let (s, r) = bounded::<()>(10);
     /// assert_eq!(r.sender_count(), 1);
     ///
     /// let s2 = s.clone();
     /// assert_eq!(r.sender_count(), 2);
-    /// # });
     /// ```
     pub fn sender_count(&self) -> usize {
         self.channel.sender_count.load(Ordering::SeqCst)
