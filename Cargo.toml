@@ -1,6 +1,6 @@
 [package]
 name = "jackiechan"
-version = "0.0.2"
+version = "0.0.3"
 authors = ["tekjar <raviteja@bytebeam.io>"]
 description = "Bounded mpsc channel optimized for lazy bulk operations"
 license = "MIT"
