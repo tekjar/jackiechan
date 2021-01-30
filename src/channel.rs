@@ -33,6 +33,7 @@ use std::process;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::time::{Duration, Instant};
 use std::usize;
 
 use concurrent_queue::{ConcurrentQueue, PopError, PushError};
@@ -546,6 +547,117 @@ impl<T> Receiver<T> {
     }
 
     /// Receives a message from the channel.
+    ///
+    /// If the channel is empty, this method waits until there is a message.
+    ///
+    /// If the channel is closed, this method receives a message or returns an error if there are
+    /// no more messages.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use jackiechan::{bounded, RecvTimeoutError};
+    /// use std::time::Duration;
+    ///
+    /// let (s, r) = bounded(10);
+    ///
+    /// assert_eq!(s.send(1), Ok(()));
+    /// assert_eq!(r.recv_timeout(Duration::from_secs(1)), Ok(1));
+    /// assert_eq!(r.recv_timeout(Duration::from_secs(1)), Err(RecvTimeoutError::Timeout));
+    /// ```
+    pub fn recv_timeout(&self, timeout: Duration) -> Result<T, RecvTimeoutError> {
+        let mut listener = None;
+
+        loop {
+            // Attempt to receive a message.
+            match self.try_recv() {
+                Ok(msg) => {
+                    // If the capacity is larger than 1, notify another blocked receive operation.
+                    // There is no need to notify stream operations because all of them get
+                    // notified every time a message is sent into the channel.
+                    match self.channel.queue.capacity() {
+                        Some(1) => {}
+                        Some(_) | None => self.channel.recv_ops.notify(1),
+                    }
+                    return Ok(msg);
+                }
+                Err(TryRecvError::Closed) => return Err(RecvTimeoutError::Closed),
+                Err(TryRecvError::Empty) => {}
+            }
+
+            // Receiving failed - now start listening for notifications or wait for one.
+            match listener.take() {
+                None => {
+                    // Start listening and then try receiving again.
+                    listener = Some(self.channel.recv_ops.listen());
+                }
+                Some(l) => {
+                    // Wait for a notification.
+                    if !l.wait_timeout(timeout) {
+                        return Err(RecvTimeoutError::Timeout);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Receives a message from the channel.
+    ///
+    /// If the channel is empty, this method waits until there is a message.
+    ///
+    /// If the channel is closed, this method receives a message or returns an error if there are
+    /// no more messages.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use jackiechan::{bounded, RecvTimeoutError};
+    /// use std::time::{Instant, Duration};
+    ///
+    /// let (s, r) = bounded(10);
+    ///
+    /// assert_eq!(s.send(1), Ok(()));
+    ///
+    /// assert_eq!(r.recv_deadline(Instant::now() + Duration::from_secs(1)), Ok(1));
+    /// assert_eq!(r.recv_deadline(Instant::now() + Duration::from_secs(1)), Err(RecvTimeoutError::Timeout));
+    /// ```
+    pub fn recv_deadline(&self, deadline: Instant) -> Result<T, RecvTimeoutError> {
+        let mut listener = None;
+
+        loop {
+            // Attempt to receive a message.
+            match self.try_recv() {
+                Ok(msg) => {
+                    // If the capacity is larger than 1, notify another blocked receive operation.
+                    // There is no need to notify stream operations because all of them get
+                    // notified every time a message is sent into the channel.
+                    match self.channel.queue.capacity() {
+                        Some(1) => {}
+                        Some(_) | None => self.channel.recv_ops.notify(1),
+                    }
+                    return Ok(msg);
+                }
+                Err(TryRecvError::Closed) => return Err(RecvTimeoutError::Closed),
+                Err(TryRecvError::Empty) => {}
+            }
+
+            // Receiving failed - now start listening for notifications or wait for one.
+            match listener.take() {
+                None => {
+                    // Start listening and then try receiving again.
+                    listener = Some(self.channel.recv_ops.listen());
+                }
+                Some(l) => {
+                    // Wait for a notification.
+                    if !l.wait_deadline(deadline) {
+                        return Err(RecvTimeoutError::Timeout);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Receives a message from the channel.
     /// If the channel is empty, this method waits until there is a message.
     ///
     /// If the channel is closed, this method receives a message or returns an error if there are
@@ -929,6 +1041,32 @@ impl fmt::Display for TryRecvError {
         match *self {
             TryRecvError::Empty => write!(f, "receiving from an empty channel"),
             TryRecvError::Closed => write!(f, "receiving from an empty and closed channel"),
+        }
+    }
+}
+
+/// An error returned from the [`recv_timeout`] method.
+///
+/// [`recv_timeout`]: super::Receiver::recv_timeout
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub enum RecvTimeoutError {
+    /// A message could not be received because the channel is empty and the operation timed out.
+    ///
+    /// If this is a zero-capacity channel, then the error indicates that there was no sender
+    /// available to send a message and the operation timed out.
+    Timeout,
+
+    /// The message could not be received because the channel is empty and disconnected.
+    Closed,
+}
+
+impl error::Error for RecvTimeoutError {}
+
+impl fmt::Display for RecvTimeoutError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            RecvTimeoutError::Timeout => "timed out waiting on receive operation".fmt(f),
+            RecvTimeoutError::Closed => "channel is empty and disconnected".fmt(f),
         }
     }
 }

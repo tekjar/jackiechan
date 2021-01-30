@@ -5,4 +5,6 @@
 mod channel;
 
 /// Channel
-pub use channel::{Sender, Receiver, SendError, TrySendError, bounded};
+pub use channel::{
+    bounded, Receiver, RecvError, RecvTimeoutError, SendError, Sender, TryRecvError, TrySendError,
+};
