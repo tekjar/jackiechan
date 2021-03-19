@@ -25,7 +25,6 @@
 //! assert_eq!(r.recv(), Ok("Hello"));
 //! ```
 
-use std::error;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
