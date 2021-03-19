@@ -1,4 +1,4 @@
-use jackiechan::{bounded, RecvTimeoutError};
+use jackiechan::mpmc::{bounded, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
 fn main() {

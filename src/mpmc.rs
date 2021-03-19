@@ -19,7 +19,7 @@
 //! # Examples
 //!
 //! ```
-//! let (s, r) = jackiechan::bounded(1);
+//! let (s, r) = jackiechan::mpmc::bounded(1);
 //!
 //! assert_eq!(s.send("Hello"), Ok(()));
 //! assert_eq!(r.recv(), Ok("Hello"));
@@ -91,7 +91,7 @@ impl<T> Channel<T> {
 /// # Examples
 ///
 /// ```
-/// use jackiechan::{bounded, TryRecvError, TrySendError};
+/// use jackiechan::mpmc::{bounded, TryRecvError, TrySendError};
 ///
 /// let (s, r) = bounded(1);
 ///
@@ -141,7 +141,7 @@ impl<T> Sender<T> {
     /// # Examples
     ///
     /// ```
-    /// use jackiechan::{bounded, TrySendError};
+    /// use jackiechan::mpmc::{bounded, TrySendError};
     ///
     /// let (s, r) = bounded(1);
     ///
@@ -178,7 +178,7 @@ impl<T> Sender<T> {
     /// # Examples
     ///
     /// ```
-    /// use jackiechan::{bounded, SendError};
+    /// use jackiechan::mpmc::{bounded, SendError};
     ///
     /// let (s, r) = bounded(100);
     ///
@@ -229,7 +229,7 @@ impl<T> Sender<T> {
     ///
     /// ```
     /// # futures_lite::future::block_on(async {
-    /// use jackiechan::{bounded, SendError};
+    /// use jackiechan::mpmc::{bounded, SendError};
     ///
     /// let (s, r) = bounded(100);
     ///
@@ -280,7 +280,7 @@ impl<T> Sender<T> {
     /// # Examples
     ///
     /// ```
-    /// use jackiechan::{bounded, RecvError};
+    /// use jackiechan::mpmc::{bounded, RecvError};
     ///
     /// let (s, r) = bounded(10);
     /// assert_eq!(s.send(1), Ok(()));
@@ -298,7 +298,7 @@ impl<T> Sender<T> {
     /// # Examples
     ///
     /// ```
-    /// use jackiechan::{bounded, RecvError};
+    /// use jackiechan::mpmc::{bounded, RecvError};
     ///
     /// let (s, r) = bounded::<()>(10);
     /// assert!(!s.is_closed());
@@ -315,7 +315,7 @@ impl<T> Sender<T> {
     /// # Examples
     ///
     /// ```
-    /// use jackiechan::bounded;
+    /// use jackiechan::mpmc::bounded;
     ///
     /// let (s, r) = bounded(10);
     ///
@@ -334,7 +334,7 @@ impl<T> Sender<T> {
     /// # Examples
     ///
     /// ```
-    /// use jackiechan::bounded;
+    /// use jackiechan::mpmc::bounded;
     ///
     /// let (s, r) = bounded(1);
     ///
@@ -351,7 +351,7 @@ impl<T> Sender<T> {
     /// # Examples
     ///
     /// ```
-    /// use jackiechan::bounded;
+    /// use jackiechan::mpmc::bounded;
     ///
     /// let (s, r) = bounded(10);
     /// assert_eq!(s.len(), 0);
@@ -369,7 +369,7 @@ impl<T> Sender<T> {
     /// # Examples
     ///
     /// ```
-    /// use jackiechan::{bounded};
+    /// use jackiechan::mpmc::{bounded};
     ///
     /// let (s, r) = bounded::<i32>(5);
     /// assert_eq!(s.capacity(), Some(5));
@@ -383,7 +383,7 @@ impl<T> Sender<T> {
     /// # Examples
     ///
     /// ```
-    /// use jackiechan::bounded;
+    /// use jackiechan::mpmc::bounded;
     ///
     /// let (s, r) = bounded::<()>(10);
     /// assert_eq!(s.receiver_count(), 1);
@@ -400,7 +400,7 @@ impl<T> Sender<T> {
     /// # Examples
     ///
     /// ```
-    /// use jackiechan::bounded;
+    /// use jackiechan::mpmc::bounded;
     ///
     /// let (s, r) = bounded::<()>(10);
     /// assert_eq!(s.sender_count(), 1);
@@ -467,7 +467,7 @@ impl<T> Receiver<T> {
     /// # Examples
     ///
     /// ```
-    /// use jackiechan::{bounded, TryRecvError};
+    /// use jackiechan::mpmc::{bounded, TryRecvError};
     ///
     /// let (s, r) = bounded(10);
     /// assert_eq!(s.send(1), Ok(()));
@@ -502,7 +502,7 @@ impl<T> Receiver<T> {
     /// # Examples
     ///
     /// ```
-    /// use jackiechan::{bounded, RecvError};
+    /// use jackiechan::mpmc::{bounded, RecvError};
     ///
     /// let (s, r) = bounded(10);
     ///
@@ -556,7 +556,7 @@ impl<T> Receiver<T> {
     /// # Examples
     ///
     /// ```
-    /// use jackiechan::{bounded, RecvTimeoutError};
+    /// use jackiechan::mpmc::{bounded, RecvTimeoutError};
     /// use std::time::Duration;
     ///
     /// let (s, r) = bounded(10);
@@ -611,7 +611,7 @@ impl<T> Receiver<T> {
     /// # Examples
     ///
     /// ```
-    /// use jackiechan::{bounded, RecvTimeoutError};
+    /// use jackiechan::mpmc::{bounded, RecvTimeoutError};
     /// use std::time::{Instant, Duration};
     ///
     /// let (s, r) = bounded(10);
@@ -705,7 +705,7 @@ impl<T> Receiver<T> {
     /// # Examples
     ///
     /// ```
-    /// use jackiechan::{bounded, RecvError};
+    /// use jackiechan::mpmc::{bounded, RecvError};
     ///
     /// let (s, r) = bounded(10);
     /// assert_eq!(s.send(1), Ok(()));
@@ -723,7 +723,7 @@ impl<T> Receiver<T> {
     /// # Examples
     ///
     /// ```
-    /// use jackiechan::{bounded, RecvError};
+    /// use jackiechan::mpmc::{bounded, RecvError};
     ///
     /// let (s, r) = bounded::<()>(10);
     /// assert!(!r.is_closed());
@@ -740,7 +740,7 @@ impl<T> Receiver<T> {
     /// # Examples
     ///
     /// ```
-    /// use jackiechan::bounded;
+    /// use jackiechan::mpmc::bounded;
     ///
     /// let (s, r) = bounded(10);
     ///
@@ -756,7 +756,7 @@ impl<T> Receiver<T> {
     /// # Examples
     ///
     /// ```
-    /// use jackiechan::bounded;
+    /// use jackiechan::mpmc::bounded;
     ///
     /// let (s, r) = bounded(1);
     ///
@@ -773,7 +773,7 @@ impl<T> Receiver<T> {
     /// # Examples
     ///
     /// ```
-    /// use jackiechan::bounded;
+    /// use jackiechan::mpmc::bounded;
     ///
     /// let (s, r) = bounded(10);
     /// assert_eq!(r.len(), 0);
@@ -791,7 +791,7 @@ impl<T> Receiver<T> {
     /// # Examples
     ///
     /// ```
-    /// use jackiechan::{bounded};
+    /// use jackiechan::mpmc::{bounded};
     ///
     /// let (s, r) = bounded::<i32>(5);
     /// assert_eq!(r.capacity(), Some(5));
@@ -805,7 +805,7 @@ impl<T> Receiver<T> {
     /// # Examples
     ///
     /// ```
-    /// use jackiechan::bounded;
+    /// use jackiechan::mpmc::bounded;
     ///
     /// let (s, r) = bounded::<()>(10);
     /// assert_eq!(r.receiver_count(), 1);
@@ -822,7 +822,7 @@ impl<T> Receiver<T> {
     /// # Examples
     ///
     /// ```
-    /// use jackiechan::bounded;
+    /// use jackiechan::mpmc::bounded;
     ///
     /// let (s, r) = bounded::<()>(10);
     /// assert_eq!(r.sender_count(), 1);
