@@ -1,5 +1,6 @@
-use jackiechan::mpmc::{bounded, RecvTimeoutError};
+use jackiechan::mpmc::{bounded};
 use std::time::{Duration, Instant};
+use jackiechan::RecvTimeoutError;
 
 fn main() {
     let (s, r) = bounded(10);
