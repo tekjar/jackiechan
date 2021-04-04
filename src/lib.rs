@@ -4,6 +4,7 @@
 
 use std::{error, fmt};
 
+pub mod buffer;
 pub mod mpmc;
 pub mod spsc;
 
