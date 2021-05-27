@@ -27,18 +27,14 @@
 
 use std::error;
 use std::fmt;
-use std::future::Future;
-use std::pin::Pin;
 use std::process;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 use std::usize;
 
 use concurrent_queue::{ConcurrentQueue, PopError, PushError};
 use event_listener::{Event, EventListener};
-use futures_core::stream::Stream;
 
 struct Channel<T> {
     /// Inner message queue.
@@ -115,9 +111,10 @@ pub fn bounded<T>(cap: usize) -> (Sender<T>, Receiver<T>) {
     let s = Sender {
         channel: channel.clone(),
     };
+
     let r = Receiver {
         channel,
-        listener: None,
+        _listener: None,
     };
     (s, r)
 }
@@ -456,7 +453,7 @@ pub struct Receiver<T> {
     channel: Arc<Channel<T>>,
 
     /// Listens for a send or close event to unblock this stream.
-    listener: Option<EventListener>,
+    _listener: Option<EventListener>,
 }
 
 impl<T> Receiver<T> {
@@ -861,50 +858,7 @@ impl<T> Clone for Receiver<T> {
 
         Receiver {
             channel: self.channel.clone(),
-            listener: None,
-        }
-    }
-}
-
-impl<T> Stream for Receiver<T> {
-    type Item = T;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        loop {
-            // If this stream is listening for events, first wait for a notification.
-            if let Some(listener) = self.listener.as_mut() {
-                futures_core::ready!(Pin::new(listener).poll(cx));
-                self.listener = None;
-            }
-
-            loop {
-                // Attempt to receive a message.
-                match self.try_recv() {
-                    Ok(msg) => {
-                        // The stream is not blocked on an event - drop the listener.
-                        self.listener = None;
-                        return Poll::Ready(Some(msg));
-                    }
-                    Err(TryRecvError::Closed) => {
-                        // The stream is not blocked on an event - drop the listener.
-                        self.listener = None;
-                        return Poll::Ready(None);
-                    }
-                    Err(TryRecvError::Empty) => {}
-                }
-
-                // Receiving failed - now start listening for notifications or wait for one.
-                match self.listener.as_mut() {
-                    None => {
-                        // Create a listener and try sending the message again.
-                        self.listener = Some(self.channel.stream_ops.listen());
-                    }
-                    Some(_) => {
-                        // Go back to the outer loop to poll the listener.
-                        break;
-                    }
-                }
-            }
+            _listener: None,
         }
     }
 }
